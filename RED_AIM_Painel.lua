@@ -20,7 +20,7 @@ gui.IgnoreGuiInset = true
 gui.Parent = playerGui
 
 local RED = Color3.fromRGB(190, 20, 35)
-local GREEN = Color3.fromRGB(35, 180, 55) -- Cor indicativa para "Ligado"
+local GREEN = Color3.fromRGB(35, 180, 55)
 local DARK_RED = Color3.fromRGB(105, 8, 18)
 local BLACK = Color3.fromRGB(13, 13, 16)
 local PANEL = Color3.fromRGB(24, 24, 29)
@@ -41,8 +41,8 @@ end
 
 local main = make("Frame", {
     Name = "Main",
-    Size = UDim2.fromOffset(430, 350),
-    Position = UDim2.new(0.5, -215, 0.5, -175),
+    Size = UDim2.fromOffset(430, 380),
+    Position = UDim2.new(0.5, -215, 0.5, -190),
     BackgroundColor3 = PANEL,
     BorderSizePixel = 0,
     Visible = true,
@@ -97,10 +97,15 @@ local close = make("TextButton", {
 }, header)
 make("UICorner", {CornerRadius = UDim.new(0, 7)}, close)
 
-local content = make("Frame", {
+-- Criando o ScrollingFrame para permitir rolar para baixo
+local content = make("ScrollingFrame", {
     Size = UDim2.new(1, -64, 1, -72),
     Position = UDim2.fromOffset(32, 64),
     BackgroundTransparency = 1,
+    CanvasSize = UDim2.new(0, 0, 0, 360),
+    ScrollBarThickness = 6,
+    ScrollBarImageColor3 = RED,
+    BorderSizePixel = 0,
 }, main)
 
 local function label(text, y)
@@ -133,7 +138,7 @@ local function button(text, x, y, width)
     return b
 end
 
--- Novo Botão de Ativar/Desativar o Aimbot (Status Principal)
+-- Botão de Ativar/Desativar o Aimbot
 label("Estado do Aimbot", 0)
 local toggleAimButton = button("STATUS: DESLIGADO", 0, 26, 366)
 toggleAimButton.BackgroundColor3 = RED
@@ -201,9 +206,64 @@ modeLight.MouseButton1Click:Connect(function()
     updateModeButtons()
 end)
 
-label("Tecla para abrir/fechar o painel", 204)
+-- Slider do Campo de Visão (FOV)
+local fovValue = 100
+local fovTitle = label("Campo de visão (FOV): 100°", 204)
+
+local sliderBack = make("Frame", {
+    Size = UDim2.new(1, 0, 0, 8),
+    Position = UDim2.fromOffset(0, 236),
+    BackgroundColor3 = BLACK,
+    BorderSizePixel = 0,
+}, content)
+make("UICorner", {CornerRadius = UDim.new(1, 0)}, sliderBack)
+
+local sliderFill = make("Frame", {
+    Size = UDim2.new((fovValue - 10) / 240, 0, 1, 0),
+    BackgroundColor3 = RED,
+    BorderSizePixel = 0,
+}, sliderBack)
+make("UICorner", {CornerRadius = UDim.new(1, 0)}, sliderFill)
+
+local knob = make("Frame", {
+    Size = UDim2.fromOffset(16, 16),
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.new((fovValue - 10) / 240, 0, 0.5, 0),
+    BackgroundColor3 = WHITE,
+    BorderSizePixel = 0,
+}, sliderBack)
+make("UICorner", {CornerRadius = UDim.new(1, 0)}, knob)
+
+local dragging = false
+local function setFovFromX(x)
+    local pct = math.clamp((x - sliderBack.AbsolutePosition.X) / sliderBack.AbsoluteSize.X, 0, 1)
+    fovValue = math.floor(10 + pct * 240 + 0.5)
+    local normalized = (fovValue - 10) / 240
+    sliderFill.Size = UDim2.new(normalized, 0, 1, 0)
+    knob.Position = UDim2.new(normalized, 0, 0.5, 0)
+    fovTitle.Text = "Campo de visão (FOV): " .. fovValue .. "°"
+end
+
+sliderBack.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        setFovFromX(input.Position.X)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        setFovFromX(input.Position.X)
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+label("Tecla para abrir/fechar o painel", 258)
 local openKey = Enum.KeyCode.RightShift
-local keyButton = button("RightShift", 0, 230, 150)
+local keyButton = button("RightShift", 0, 284, 150)
 local keyChoices = {Enum.KeyCode.RightShift, Enum.KeyCode.Insert, Enum.KeyCode.F4, Enum.KeyCode.F6, Enum.KeyCode.Home}
 local keyIndex = 1
 keyButton.MouseButton1Click:Connect(function()
@@ -214,9 +274,9 @@ end)
 
 local footer = make("TextLabel", {
     Size = UDim2.new(1, 0, 0, 28),
-    Position = UDim2.fromOffset(0, 266),
+    Position = UDim2.fromOffset(0, 322),
     BackgroundTransparency = 1,
-    Text = "Interface de controle • Sistema Ativar/Desativar integrado",
+    Text = "Painel com Rolagem • FOV de 10° a 250°",
     TextColor3 = GRAY,
     Font = Enum.Font.Gotham,
     TextSize = 11,
