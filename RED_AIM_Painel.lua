@@ -1,7 +1,5 @@
 -- RED AIM - Painel de configurações (Roblox Studio)
 -- Coloque este arquivo como um LocalScript em StarterPlayer > StarterPlayerScripts.
--- Este arquivo cria somente a interface e os controles visuais; não mira automaticamente
--- nem altera jogos de terceiros.
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -22,11 +20,15 @@ gui.IgnoreGuiInset = true
 gui.Parent = playerGui
 
 local RED = Color3.fromRGB(190, 20, 35)
+local GREEN = Color3.fromRGB(35, 180, 55) -- Cor indicativa para "Ligado"
 local DARK_RED = Color3.fromRGB(105, 8, 18)
 local BLACK = Color3.fromRGB(13, 13, 16)
 local PANEL = Color3.fromRGB(24, 24, 29)
 local WHITE = Color3.fromRGB(245, 245, 245)
 local GRAY = Color3.fromRGB(175, 175, 180)
+
+-- Variável de estado global do Aimbot
+getgenv().RedAimEnabled = false
 
 local function make(className, props, parent)
     local obj = Instance.new(className)
@@ -131,11 +133,31 @@ local function button(text, x, y, width)
     return b
 end
 
-label("Parte selecionada", 0)
+-- Novo Botão de Ativar/Desativar o Aimbot (Status Principal)
+label("Estado do Aimbot", 0)
+local toggleAimButton = button("STATUS: DESLIGADO", 0, 26, 366)
+toggleAimButton.BackgroundColor3 = RED
+
+local function updateAimToggle()
+    if getgenv().RedAimEnabled then
+        toggleAimButton.Text = "STATUS: LIGADO"
+        toggleAimButton.BackgroundColor3 = GREEN
+    else
+        toggleAimButton.Text = "STATUS: DESLIGADO"
+        toggleAimButton.BackgroundColor3 = RED
+    end
+end
+
+toggleAimButton.MouseButton1Click:Connect(function()
+    getgenv().RedAimEnabled = not getgenv().RedAimEnabled
+    updateAimToggle()
+end)
+
+label("Parte selecionada", 68)
 local selectedPart = "Cabeça"
-local partButton = button("Cabeça", 0, 26, 112)
-local bodyButton = button("Corpo", 120, 26, 112)
-local customButton = button("Personalizado", 240, 26, 126)
+local partButton = button("Cabeça", 0, 94, 112)
+local bodyButton = button("Corpo", 120, 94, 112)
+local customButton = button("Personalizado", 240, 94, 126)
 
 local function updatePartButtons()
     partButton.BackgroundColor3 = selectedPart == "Cabeça" and RED or BLACK
@@ -155,11 +177,11 @@ customButton.MouseButton1Click:Connect(function()
     updatePartButtons()
 end)
 
-label("Perfil de assistência (apenas configuração)", 68)
+label("Perfil de assistência", 136)
 local selectedMode = "Leve"
-local modeHacker = button("Hacker", 0, 94, 112)
-local modeFast = button("Rápido", 120, 94, 112)
-local modeLight = button("Leve", 240, 94, 126)
+local modeHacker = button("Hacker", 0, 162, 112)
+local modeFast = button("Rápido", 120, 162, 112)
+local modeLight = button("Leve", 240, 162, 126)
 
 local function updateModeButtons()
     modeHacker.BackgroundColor3 = selectedMode == "Hacker" and RED or BLACK
@@ -179,70 +201,9 @@ modeLight.MouseButton1Click:Connect(function()
     updateModeButtons()
 end)
 
-label("Campo de visão (FOV): 100°", 137)
-local fovValue = 100
-local fovLabel = content:FindFirstChildOfClass("TextLabel")
--- Localiza o rótulo recém-criado pelo texto para atualizá-lo.
-local fovTitle
-for _, child in ipairs(content:GetChildren()) do
-    if child:IsA("TextLabel") and child.Text:find("Campo de visão") then
-        fovTitle = child
-        break
-    end
-end
-
-local sliderBack = make("Frame", {
-    Size = UDim2.new(1, 0, 0, 8),
-    Position = UDim2.fromOffset(0, 169),
-    BackgroundColor3 = BLACK,
-    BorderSizePixel = 0,
-}, content)
-make("UICorner", {CornerRadius = UDim.new(1, 0)}, sliderBack)
-local sliderFill = make("Frame", {
-    Size = UDim2.new((fovValue - 10) / 240, 0, 1, 0),
-    BackgroundColor3 = RED,
-    BorderSizePixel = 0,
-}, sliderBack)
-make("UICorner", {CornerRadius = UDim.new(1, 0)}, sliderFill)
-local knob = make("Frame", {
-    Size = UDim2.fromOffset(16, 16),
-    AnchorPoint = Vector2.new(0.5, 0.5),
-    Position = UDim2.new((fovValue - 10) / 240, 0, 0.5, 0),
-    BackgroundColor3 = WHITE,
-    BorderSizePixel = 0,
-}, sliderBack)
-make("UICorner", {CornerRadius = UDim.new(1, 0)}, knob)
-
-local dragging = false
-local function setFovFromX(x)
-    local pct = math.clamp((x - sliderBack.AbsolutePosition.X) / sliderBack.AbsoluteSize.X, 0, 1)
-    fovValue = math.floor(10 + pct * 240 + 0.5)
-    local normalized = (fovValue - 10) / 240
-    sliderFill.Size = UDim2.new(normalized, 0, 1, 0)
-    knob.Position = UDim2.new(normalized, 0, 0.5, 0)
-    fovTitle.Text = "Campo de visão (FOV): " .. fovValue .. "°"
-end
-
-sliderBack.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        setFovFromX(input.Position.X)
-    end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        setFovFromX(input.Position.X)
-    end
-end)
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = false
-    end
-end)
-
-label("Tecla para abrir/fechar o painel", 190)
+label("Tecla para abrir/fechar o painel", 204)
 local openKey = Enum.KeyCode.RightShift
-local keyButton = button("RightShift", 0, 216, 150)
+local keyButton = button("RightShift", 0, 230, 150)
 local keyChoices = {Enum.KeyCode.RightShift, Enum.KeyCode.Insert, Enum.KeyCode.F4, Enum.KeyCode.F6, Enum.KeyCode.Home}
 local keyIndex = 1
 keyButton.MouseButton1Click:Connect(function()
@@ -251,22 +212,11 @@ keyButton.MouseButton1Click:Connect(function()
     keyButton.Text = openKey.Name
 end)
 
-local status = make("TextLabel", {
-    Size = UDim2.new(1, -160, 0, 30),
-    Position = UDim2.fromOffset(164, 216),
-    BackgroundTransparency = 1,
-    Text = "Painel aberto",
-    TextColor3 = GRAY,
-    Font = Enum.Font.Gotham,
-    TextSize = 12,
-    TextXAlignment = Enum.TextXAlignment.Left,
-}, content)
-
 local footer = make("TextLabel", {
     Size = UDim2.new(1, 0, 0, 28),
-    Position = UDim2.fromOffset(0, 255),
+    Position = UDim2.fromOffset(0, 266),
     BackgroundTransparency = 1,
-    Text = "Interface de demonstração • FOV de 10° a 250°",
+    Text = "Interface de controle • Sistema Ativar/Desativar integrado",
     TextColor3 = GRAY,
     Font = Enum.Font.Gotham,
     TextSize = 11,
@@ -312,3 +262,4 @@ end)
 
 updatePartButtons()
 updateModeButtons()
+updateAimToggle()
