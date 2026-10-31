@@ -1,5 +1,5 @@
 -- RED AIM - Painel de Configurações com Abas (Roblox Studio)
--- Coloque este arquivo como um LocalScript em StarterPlayer > StarterPlayerScripts.
+-- Cole este código diretamente no executor se não quiser usar o loadstring ainda.
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
