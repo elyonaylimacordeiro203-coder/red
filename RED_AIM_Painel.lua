@@ -1,9 +1,10 @@
--- RED AIM - Painel Completo Otimizado & Sincronizado
+-- RED AIM - Painel Completo Otimizado & Timer de 5 Segundos para Minimizar
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 local Camera = workspace.CurrentCamera
 local localPlayer = Players.LocalPlayer
 
@@ -55,8 +56,45 @@ getgenv().RedAimConfig = {
     EspCaixa = false,
     EspVida = false,
     EspHighlight = false, 
+    EspName = false,      
+    EspDistancia = false, 
     EspTeamCheck = false,
 }
+
+-- Sistema de Perfis Múltiplos (Até 5 Slots)
+getgenv().RedAimProfiles = getgenv().RedAimProfiles or {
+    {name = "Perfil 1 (Vazio)", config = {}},
+    {name = "Perfil 2 (Vazio)", config = {}},
+    {name = "Perfil 3 (Vazio)", config = {}},
+    {name = "Perfil 4 (Vazio)", config = {}},
+    {name = "Perfil 5 (Vazio)", config = {}},
+}
+
+local profilesFileName = "RedAim_Profiles_v2.json"
+local currentSelectedSlot = 1
+
+local function saveAllProfiles()
+    pcall(function()
+        if writefile then
+            local data = HttpService:JSONEncode(getgenv().RedAimProfiles)
+            writefile(profilesFileName, data)
+        end
+    end)
+end
+
+local function loadAllProfiles()
+    pcall(function()
+        if readfile and isfile and isfile(profilesFileName) then
+            local content = readfile(profilesFileName)
+            local data = HttpService:JSONDecode(content)
+            if type(data) == "table" then
+                getgenv().RedAimProfiles = data
+            end
+        end
+    end)
+end
+
+loadAllProfiles()
 
 -- ==================== MOTOR DE LÓGICA (AIMBOT & ESP) ====================
 local activeEsp = {}
@@ -99,11 +137,27 @@ local function getEsp(player)
     healthBar.Thickness = 2
     healthBar.Color = Color3.fromRGB(0, 255, 100)
 
+    local nameText = Drawing.new("Text")
+    nameText.Visible = false
+    nameText.Size = 11
+    nameText.Center = true
+    nameText.Outline = true
+    nameText.Color = Color3.fromRGB(255, 255, 255)
+
+    local distText = Drawing.new("Text")
+    distText.Visible = false
+    distText.Size = 11
+    distText.Center = true
+    distText.Outline = false 
+    distText.Color = Color3.fromRGB(255, 255, 255)
+
     local data = {
         box = box,
         line = line,
         healthBar = healthBar,
         healthBackground = healthBackground,
+        nameText = nameText,
+        distText = distText,
     }
 
     activeEsp[player] = data
@@ -176,7 +230,6 @@ end
 
 -- Render Loop Ultra Rápido
 RunService:BindToRenderStep("RedAimEngine", Enum.RenderPriority.Camera.Value + 1, function()
-    -- 1. Controle Visual do FOV
     if getgenv().RedAimConfig.ExibirFOV then
         fovCircle.Visible = true
         local size = getgenv().RedAimConfig.FOVValue * 2
@@ -185,7 +238,6 @@ RunService:BindToRenderStep("RedAimEngine", Enum.RenderPriority.Camera.Value + 1
         fovCircle.Visible = false
     end
 
-    -- 2. Aimbot
     local config = getgenv().RedAimConfig
     if config.AimbotEnabled and config.TargetPart and config.AimMode then
         local target = getClosestPlayerWithinFOV()
@@ -204,12 +256,20 @@ RunService:BindToRenderStep("RedAimEngine", Enum.RenderPriority.Camera.Value + 1
         end
     end
 
-    -- 3. Motor ESP e Highlight Super Leve em Tempo Real
+    local myRoot = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
+
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= localPlayer then
             local char = p.Character
             local esp = getEsp(p)
             
+            if char and char:FindFirstChild("Humanoid") then
+                local hum = char.Humanoid
+                hum.NameDisplayDistance = 0
+                hum.HealthDisplayDistance = 0
+                hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+            end
+
             local shouldRender = false
             if config.EspEnabled and char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Head") and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
                 local passTeam = true
@@ -291,11 +351,39 @@ RunService:BindToRenderStep("RedAimEngine", Enum.RenderPriority.Camera.Value + 1
                             esp.healthBackground.Visible = false
                             esp.healthBar.Visible = false
                         end
+
+                        local inRange = false
+                        if myRoot then
+                            local distance = (myRoot.Position - rootPart.Position).Magnitude
+                            if distance <= 35 then
+                                inRange = true
+                            end
+                        end
+
+                        if config.EspName and inRange then
+                            esp.nameText.Visible = true
+                            esp.nameText.Text = p.Name
+                            esp.nameText.Position = Vector2.new(rootPos.X, headPos.Y - 18)
+                        else
+                            esp.nameText.Visible = false
+                        end
+
+                        if config.EspDistancia and myRoot then
+                            local studsDist = (myRoot.Position - rootPart.Position).Magnitude
+                            local metersDist = math.floor(studsDist * 0.28)
+                            esp.distText.Visible = true
+                            esp.distText.Text = tostring(metersDist) .. "m"
+                            esp.distText.Position = Vector2.new(rootPos.X, legPos.Y + 4)
+                        else
+                            esp.distText.Visible = false
+                        end
                     else
                         esp.box.Visible = false
                         esp.line.Visible = false
                         esp.healthBackground.Visible = false
                         esp.healthBar.Visible = false
+                        esp.nameText.Visible = false
+                        esp.distText.Visible = false
                     end
                 end
             end
@@ -305,6 +393,8 @@ RunService:BindToRenderStep("RedAimEngine", Enum.RenderPriority.Camera.Value + 1
                 esp.line.Visible = false
                 esp.healthBackground.Visible = false
                 esp.healthBar.Visible = false
+                esp.nameText.Visible = false
+                esp.distText.Visible = false
                 if activeHighlights[p] then
                     activeHighlights[p].Enabled = false
                 end
@@ -349,6 +439,14 @@ local main = make("Frame", {
 }, gui)
 make("UICorner", {CornerRadius = UDim.new(0, 8)}, main)
 local mainStroke = make("UIStroke", {Color = currentTheme.main, Thickness = 1.5}, main)
+
+main.Size = UDim2.fromOffset(0, 0)
+main.Position = UDim2.new(0.5, 0, 0.5, 0)
+local openTween = TweenService:Create(main, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+    Size = UDim2.fromOffset(450, 480),
+    Position = UDim2.new(0.5, -225, 0.5, -240)
+})
+openTween:Play()
 
 local header = make("Frame", {
     Size = UDim2.new(1, 0, 0, 42),
@@ -465,6 +563,9 @@ for i, name in ipairs(tabNames) do
     tabButtons[name] = btn
 end
 
+local checkboxUpdaters = {}
+local targetPartUpdaters = nil
+local aimModeUpdaters = nil
 local fovCheckboxUpdate = nil
 
 local function createCheckbox(parent, text, configKey, layoutOrder)
@@ -502,6 +603,11 @@ local function createCheckbox(parent, text, configKey, layoutOrder)
 
     box.MouseButton1Click:Connect(toggle)
     lbl.MouseButton1Click:Connect(toggle)
+
+    checkboxUpdaters[configKey] = function(state)
+        box.BackgroundColor3 = state and CHECK_BG_ON or CHECK_BG_OFF
+        box.Text = state and "✓" or ""
+    end
 
     if configKey == "ExibirFOV" then
         fovCheckboxUpdate = function(state)
@@ -565,6 +671,14 @@ local function createTargetPartsSelector(parent, layoutOrder)
     headLbl.MouseButton1Click:Connect(function() selectPart("Head") end)
     chestBox.MouseButton1Click:Connect(function() selectPart("Chest") end)
     chestLbl.MouseButton1Click:Connect(function() selectPart("Chest") end)
+
+    targetPartUpdaters = function(part)
+        headBox.BackgroundColor3 = (part == "Head") and CHECK_BG_ON or CHECK_BG_OFF
+        headBox.Text = (part == "Head") and "✓" or ""
+        chestBox.BackgroundColor3 = (part == "Chest") and CHECK_BG_ON or CHECK_BG_OFF
+        chestBox.Text = (part == "Chest") and "✓" or ""
+    end
+
     return frame
 end
 
@@ -638,6 +752,15 @@ local function createAimModesSelector(parent, layoutOrder)
     rapidoLbl.MouseButton1Click:Connect(function() selectMode("Rapido") end)
     leveBox.MouseButton1Click:Connect(function() selectMode("Leve") end)
     leveLbl.MouseButton1Click:Connect(function() selectMode("Leve") end)
+
+    aimModeUpdaters = function(mode)
+        hackerBox.BackgroundColor3 = (mode == "Hacker") and CHECK_BG_ON or CHECK_BG_OFF
+        hackerBox.Text = (mode == "Hacker") and "✓" or ""
+        rapidoBox.BackgroundColor3 = (mode == "Rapido") and CHECK_BG_ON or CHECK_BG_OFF
+        rapidoBox.Text = (mode == "Rapido") and "✓" or ""
+        leveBox.BackgroundColor3 = (mode == "Leve") and CHECK_BG_ON or CHECK_BG_OFF
+        leveBox.Text = (mode == "Leve") and "✓" or ""
+    end
 
     return frame
 end
@@ -717,14 +840,13 @@ local function createFovSlider(parent, layoutOrder)
     return frame
 end
 
--- Preenchendo as Abas
 local aimbotPage = pages["Aimbot"]
 createCheckbox(aimbotPage, "Ativar Aimbot", "AimbotEnabled", 1)
 createTargetPartsSelector(aimbotPage, 2)
 createAimModesSelector(aimbotPage, 3)
-createLeveSmoothSlider(aimbotPage, 4) 
-createCheckbox(aimbotPage, "Exibir Circulo do FOV", "ExibirFOV", 5)
-createFovSlider(aimbotPage, 6)
+createCheckbox(aimbotPage, "Exibir Circulo do FOV", "ExibirFOV", 4)
+createFovSlider(aimbotPage, 5)
+createLeveSmoothSlider(aimbotPage, 6) 
 createCheckbox(aimbotPage, "Wall Check", "WallCheck", 7)
 createCheckbox(aimbotPage, "Team Check", "TeamCheck", 8)
 
@@ -734,7 +856,9 @@ createCheckbox(espPage, "ESP Linha", "EspLinha", 2)
 createCheckbox(espPage, "ESP Caixa", "EspCaixa", 3)
 createCheckbox(espPage, "ESP Vida", "EspVida", 4)
 createCheckbox(espPage, "ESP Highlight", "EspHighlight", 5)
-createCheckbox(espPage, "Team Check", "EspTeamCheck", 6)
+createCheckbox(espPage, "ESP Name", "EspName", 6)          
+createCheckbox(espPage, "ESP Distância", "EspDistancia", 7)
+createCheckbox(espPage, "Team Check", "EspTeamCheck", 8)
 
 local diversosPage = pages["Diversos"]
 make("TextLabel", {Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Text = "Tecla para abrir / fechar painel:", TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 1}, diversosPage)
@@ -750,6 +874,162 @@ bindButton.MouseButton1Click:Connect(function()
     bindButton.TextColor3 = WHITE
 end)
 
+-- Controle de Cooldown/Timer de 5 segundos para a notificação de minimizado
+local lastMinimizeTime = 0
+
+-- Notificação de Minimizado (Com timer de segurança de 5 segundos)
+local function showMinifiedNotification(bindName)
+    local currentTime = tick()
+    if currentTime - lastMinimizeTime < 5 then
+        return -- Se fechou/abriu dentro do intervalo de 5 segundos, não exibe para não poluir
+    end
+    lastMinimizeTime = currentTime
+
+    local notif = make("Frame", {
+        Size = UDim2.fromOffset(400, 75),
+        Position = UDim2.new(0.5, -200, 0.75, 0),
+        BackgroundColor3 = Color3.fromRGB(22, 22, 28),
+        BorderSizePixel = 0,
+        ZIndex = 999999,
+    }, gui)
+    make("UICorner", {CornerRadius = UDim.new(0, 8)}, notif)
+    make("UIStroke", {Color = currentTheme.main, Thickness = 1.5}, notif)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 26),
+        Position = UDim2.new(0, 0, 0, 10),
+        BackgroundTransparency = 1,
+        Text = "Minimizado!",
+        TextColor3 = currentTheme.main,
+        Font = Enum.Font.GothamBold,
+        TextSize = 16,
+        TextXAlignment = Enum.TextXAlignment.Center,
+        ZIndex = 1000000,
+    }, notif)
+
+    local lineContainer = make("Frame", {
+        Size = UDim2.new(1, 0, 0, 24),
+        Position = UDim2.new(0, 0, 0, 38),
+        BackgroundTransparency = 1,
+        ZIndex = 1000000,
+    }, notif)
+
+    local part1 = "aperte "
+    local keyText = bindName
+    local part2 = " para abrir o painel novamente"
+
+    local font = Enum.Font.GothamBold
+    local textSize = 12
+
+    local t1Label = make("TextLabel", {
+        BackgroundTransparency = 1,
+        Text = part1,
+        TextColor3 = WHITE,
+        Font = font,
+        TextSize = textSize,
+        Size = UDim2.new(0, 0, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.X,
+        ZIndex = 1000000,
+    }, lineContainer)
+
+    local keyLabel = make("TextLabel", {
+        BackgroundTransparency = 1,
+        Text = keyText,
+        TextColor3 = CHECK_GREEN,
+        Font = font,
+        TextSize = textSize,
+        Size = UDim2.new(0, 0, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.X,
+        ZIndex = 1000000,
+    }, lineContainer)
+
+    local t2Label = make("TextLabel", {
+        BackgroundTransparency = 1,
+        Text = part2,
+        TextColor3 = WHITE,
+        Font = font,
+        TextSize = textSize,
+        Size = UDim2.new(0, 0, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.X,
+        ZIndex = 1000000,
+    }, lineContainer)
+
+    RunService.RenderStepped:Wait()
+    local totalWidth = t1Label.AbsoluteSize.X + keyLabel.AbsoluteSize.X + t2Label.AbsoluteSize.X
+
+    local startX = (400 - totalWidth) / 2
+    t1Label.Position = UDim2.new(0, startX, 0, 0)
+    keyLabel.Position = UDim2.new(0, startX + t1Label.AbsoluteSize.X, 0, 0)
+    t2Label.Position = UDim2.new(0, startX + t1Label.AbsoluteSize.X + keyLabel.AbsoluteSize.X, 0, 0)
+
+    notif.Size = UDim2.fromOffset(0, 0)
+    notif.Position = UDim2.new(0.5, 0, 0.75, 37)
+    
+    local showTween = TweenService:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = UDim2.fromOffset(400, 75),
+        Position = UDim2.new(0.5, -200, 0.75, 0)
+    })
+    showTween:Play()
+
+    task.delay(3, function()
+        pcall(function()
+            local hideTween = TweenService:Create(notif, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+                Size = UDim2.fromOffset(0, 0),
+                Position = UDim2.new(0.5, 0, 0.75, 37)
+            })
+            hideTween:Play()
+            hideTween.Completed:Wait()
+            notif:Destroy()
+        end)
+    end)
+end
+
+-- Notificação de Fechado com Sucesso (Exclusiva do Fechamento Definitivo)
+local function showClosedNotification()
+    local notif = make("Frame", {
+        Size = UDim2.fromOffset(360, 60),
+        Position = UDim2.new(0.5, -180, 0.75, 0),
+        BackgroundColor3 = Color3.fromRGB(22, 22, 28),
+        BorderSizePixel = 0,
+        ZIndex = 999999,
+    }, gui)
+    make("UICorner", {CornerRadius = UDim.new(0, 8)}, notif)
+    make("UIStroke", {Color = CHECK_GREEN, Thickness = 1.5}, notif)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, 0, 1, 0),
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundTransparency = 1,
+        Text = "Fechado com sucesso!",
+        TextColor3 = CHECK_GREEN,
+        Font = Enum.Font.GothamBold,
+        TextSize = 15,
+        TextXAlignment = Enum.TextXAlignment.Center,
+        ZIndex = 1000000,
+    }, notif)
+
+    notif.Size = UDim2.fromOffset(0, 0)
+    notif.Position = UDim2.new(0.5, 0, 0.75, 30)
+    
+    local showTween = TweenService:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = UDim2.fromOffset(360, 60),
+        Position = UDim2.new(0.5, -180, 0.75, 0)
+    })
+    showTween:Play()
+
+    task.delay(3, function()
+        pcall(function()
+            local hideTween = TweenService:Create(notif, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+                Size = UDim2.fromOffset(0, 0),
+                Position = UDim2.new(0.5, 0, 0.75, 30)
+            })
+            hideTween:Play()
+            hideTween.Completed:Wait()
+            notif:Destroy()
+        end)
+    end)
+end
+
 UserInputService.InputBegan:Connect(function(input, processed)
     if bindingKey and input.UserInputType == Enum.UserInputType.Keyboard then
         getgenv().RedAimBind = input.KeyCode
@@ -758,15 +1038,220 @@ UserInputService.InputBegan:Connect(function(input, processed)
         bindingKey = false
         return
     end
+
     if not processed and input.KeyCode == getgenv().RedAimBind then
-        main.Visible = not main.Visible
+        if main.Visible then
+            local bindName = tostring(getgenv().RedAimBind.Name)
+            local closeTween = TweenService:Create(main, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+                Size = UDim2.fromOffset(0, 0),
+                Position = UDim2.new(0.5, 0, 0.5, 0)
+            })
+            closeTween:Play()
+            closeTween.Completed:Wait()
+            main.Visible = false
+            showMinifiedNotification(bindName)
+        else
+            main.Visible = true
+            main.Size = UDim2.fromOffset(0, 0)
+            main.Position = UDim2.new(0.5, 0, 0.5, 0)
+            local openTween = TweenService:Create(main, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                Size = UDim2.fromOffset(450, 480),
+                Position = UDim2.new(0.5, -225, 0.5, -240)
+            })
+            openTween:Play()
+        end
     end
 end)
 
 make("TextLabel", {Size = UDim2.new(1, 0, 0, 10), BackgroundTransparency = 1, Text = "", LayoutOrder = 3}, diversosPage)
-make("TextLabel", {Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Text = "Cor da interface", TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 4}, diversosPage)
 
-local themeButton = make("TextButton", {Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = CHECK_BG_OFF, Text = currentTheme.name, TextColor3 = currentTheme.main, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Center, BorderSizePixel = 0, LayoutOrder = 5}, diversosPage)
+-- Container Estilizado para Perfis
+local profileContainer = make("Frame", {
+    Size = UDim2.new(1, 0, 0, 155),
+    BackgroundColor3 = Color3.fromRGB(18, 18, 22),
+    BorderSizePixel = 0,
+    LayoutOrder = 4,
+}, diversosPage)
+make("UICorner", {CornerRadius = UDim.new(0, 8)}, profileContainer)
+make("UIStroke", {Color = GRAY, Transparency = 0.7, Thickness = 1}, profileContainer)
+
+make("TextLabel", {
+    Size = UDim2.new(1, -20, 0, 26),
+    Position = UDim2.fromOffset(10, 8),
+    BackgroundTransparency = 1,
+    Text = "Perfis de Configuração (Slots 1 a 5)",
+    TextColor3 = WHITE,
+    Font = Enum.Font.GothamBold,
+    TextSize = 13,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, profileContainer)
+
+local slotRow = make("Frame", {
+    Size = UDim2.new(1, -20, 0, 32),
+    Position = UDim2.fromOffset(10, 38),
+    BackgroundTransparency = 1,
+}, profileContainer)
+make("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6)}, slotRow)
+
+local slotButtons = {}
+for i = 1, 5 do
+    local sBtn = make("TextButton", {
+        Size = UDim2.new(0.2, -5, 1, 0),
+        BackgroundColor3 = (i == currentSelectedSlot) and Color3.fromRGB(35, 35, 45) or Color3.fromRGB(24, 24, 30),
+        Text = tostring(i),
+        TextColor3 = (i == currentSelectedSlot) and WHITE or GRAY,
+        Font = Enum.Font.GothamBold,
+        TextSize = 13,
+        BorderSizePixel = 0,
+        LayoutOrder = i,
+    }, slotRow)
+    make("UICorner", {CornerRadius = UDim.new(0, 6)}, sBtn)
+    make("UIStroke", {Color = (i == currentSelectedSlot) and currentTheme.main or GRAY, Transparency = (i == currentSelectedSlot) and 0 or 0.6, Thickness = 1}, sBtn)
+    slotButtons[i] = sBtn
+end
+
+local profileNameBox = make("TextBox", {
+    Size = UDim2.new(1, -20, 0, 32),
+    Position = UDim2.fromOffset(10, 76),
+    BackgroundColor3 = Color3.fromRGB(12, 12, 15),
+    Text = getgenv().RedAimProfiles[currentSelectedSlot].name,
+    TextColor3 = WHITE,
+    PlaceholderText = "Nome do perfil...",
+    PlaceholderColor3 = GRAY,
+    Font = Enum.Font.GothamBold,
+    TextSize = 12,
+    ClearTextOnFocus = false,
+    BorderSizePixel = 0,
+}, profileContainer)
+make("UICorner", {CornerRadius = UDim.new(0, 6)}, profileNameBox)
+make("UIStroke", {Color = GRAY, Transparency = 0.6, Thickness = 1}, profileContainer)
+
+local actionRow = make("Frame", {
+    Size = UDim2.new(1, -20, 0, 32),
+    Position = UDim2.fromOffset(10, 114),
+    BackgroundTransparency = 1,
+}, profileContainer)
+make("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4)}, actionRow)
+
+local saveProfileBtn = make("TextButton", {
+    Size = UDim2.new(0.33, -3, 1, 0),
+    BackgroundColor3 = Color3.fromRGB(24, 45, 30),
+    Text = "Salvar",
+    TextColor3 = CHECK_GREEN,
+    Font = Enum.Font.GothamBold,
+    TextSize = 11,
+    BorderSizePixel = 0,
+    LayoutOrder = 1,
+}, actionRow)
+make("UICorner", {CornerRadius = UDim.new(0, 6)}, saveProfileBtn)
+make("UIStroke", {Color = CHECK_GREEN, Transparency = 0.4, Thickness = 1}, saveProfileBtn)
+
+local resetProfileBtn = make("TextButton", {
+    Size = UDim2.new(0.33, -3, 1, 0),
+    BackgroundColor3 = Color3.fromRGB(45, 24, 24),
+    Text = "Redefinir",
+    TextColor3 = Color3.fromRGB(255, 90, 90),
+    Font = Enum.Font.GothamBold,
+    TextSize = 11,
+    BorderSizePixel = 0,
+    LayoutOrder = 2,
+}, actionRow)
+make("UICorner", {CornerRadius = UDim.new(0, 6)}, resetProfileBtn)
+make("UIStroke", {Color = Color3.fromRGB(220, 50, 50), Transparency = 0.4, Thickness = 1}, resetProfileBtn)
+
+local loadProfileBtn = make("TextButton", {
+    Size = UDim2.new(0.33, -3, 1, 0),
+    BackgroundColor3 = Color3.fromRGB(28, 28, 35),
+    Text = "Carregar",
+    TextColor3 = WHITE,
+    Font = Enum.Font.GothamBold,
+    TextSize = 11,
+    BorderSizePixel = 0,
+    LayoutOrder = 3,
+}, actionRow)
+make("UICorner", {CornerRadius = UDim.new(0, 6)}, loadProfileBtn)
+make("UIStroke", {Color = GRAY, Transparency = 0.5, Thickness = 1}, loadProfileBtn)
+
+for i = 1, 5 do
+    slotButtons[i].MouseButton1Click:Connect(function()
+        currentSelectedSlot = i
+        for idx, btn in ipairs(slotButtons) do
+            local isSel = (idx == i)
+            btn.BackgroundColor3 = isSel and Color3.fromRGB(35, 35, 45) or Color3.fromRGB(24, 24, 30)
+            btn.TextColor3 = isSel and WHITE or GRAY
+            local stroke = btn:FindFirstChildOfClass("UIStroke")
+            if stroke then
+                stroke.Color = isSel and currentTheme.main or GRAY
+                stroke.Transparency = isSel and 0 or 0.6
+            end
+        end
+        profileNameBox.Text = getgenv().RedAimProfiles[i].name
+    end)
+end
+
+saveProfileBtn.MouseButton1Click:Connect(function()
+    local nameInput = profileNameBox.Text
+    if nameInput == "" then nameInput = "Perfil " .. tostring(currentSelectedSlot) end
+    
+    local configCopy = {}
+    for k, v in pairs(getgenv().RedAimConfig) do
+        configCopy[k] = v
+    end
+    
+    getgenv().RedAimProfiles[currentSelectedSlot] = {
+        name = nameInput,
+        config = configCopy
+    }
+    
+    saveAllProfiles()
+    saveProfileBtn.Text = "Salvo!"
+    task.wait(1.2)
+    saveProfileBtn.Text = "Salvar"
+end)
+
+resetProfileBtn.MouseButton1Click:Connect(function()
+    getgenv().RedAimProfiles[currentSelectedSlot] = {
+        name = "Perfil " .. tostring(currentSelectedSlot) .. " (Vazio)",
+        config = {}
+    }
+    profileNameBox.Text = getgenv().RedAimProfiles[currentSelectedSlot].name
+    saveAllProfiles()
+    
+    resetProfileBtn.Text = "Redefinido!"
+    task.wait(1.2)
+    resetProfileBtn.Text = "Redefinir"
+end)
+
+loadProfileBtn.MouseButton1Click:Connect(function()
+    local targetProfile = getgenv().RedAimProfiles[currentSelectedSlot]
+    if targetProfile and targetProfile.config and next(targetProfile.config) ~= nil then
+        for k, v in pairs(targetProfile.config) do
+            getgenv().RedAimConfig[k] = v
+            if checkboxUpdaters[k] then
+                checkboxUpdaters[k](v)
+            end
+        end
+        if targetPartUpdaters then
+            targetPartUpdaters(getgenv().RedAimConfig.TargetPart)
+        end
+        if aimModeUpdaters then
+            aimModeUpdaters(getgenv().RedAimConfig.AimMode)
+        end
+
+        loadProfileBtn.Text = "Carregado!"
+        task.wait(1.2)
+        loadProfileBtn.Text = "Carregar"
+    else
+        loadProfileBtn.Text = "Vazio!"
+        task.wait(1.2)
+        loadProfileBtn.Text = "Carregar"
+    end
+end)
+
+make("TextLabel", {Size = UDim2.new(1, 0, 0, 10), BackgroundTransparency = 1, Text = "", LayoutOrder = 5}, diversosPage)
+make("TextLabel", {Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Text = "Cor da interface", TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 6}, diversosPage)
+
+local themeButton = make("TextButton", {Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = CHECK_BG_OFF, Text = currentTheme.name, TextColor3 = currentTheme.main, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Center, BorderSizePixel = 0, LayoutOrder = 7}, diversosPage)
 make("UICorner", {CornerRadius = UDim.new(0, 6)}, themeButton)
 local themeStroke = make("UIStroke", {Color = GRAY, Transparency = 0.5, Thickness = 1}, themeButton)
 
@@ -780,13 +1265,135 @@ themeButton.MouseButton1Click:Connect(function()
     fovStroke.Color = currentTheme.main
     for _, h in ipairs(sliderFills) do h.BackgroundColor3 = currentTheme.main end
     for _, b in pairs(tabButtons) do if b.BackgroundColor3 ~= TAB_BG then b.BackgroundColor3 = currentTheme.main end end
+    
+    local selBtn = slotButtons[currentSelectedSlot]
+    if selBtn then
+        local str = selBtn:FindFirstChildOfClass("UIStroke")
+        if str then str.Color = currentTheme.main end
+    end
 end)
 
+-- ==================== ABA INFO DETALHADA COM FECHAR PAINEL ====================
 local infoPage = pages["Info"]
-make("TextLabel", {Size = UDim2.new(1, 0, 0, 18), BackgroundTransparency = 1, Text = "Executor detetado:", TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 1}, infoPage)
-make("TextLabel", {Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, Text = tostring(identifyexecutor and identifyexecutor() or "Desconhecido"), TextColor3 = GRAY, Font = Enum.Font.GothamSemibold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 2}, infoPage)
 
-local rejoinButton = make("TextButton", {Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = CHECK_BG_OFF, Text = "Reentrar no Servidor (Rejoin)", TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 13, BorderSizePixel = 0, LayoutOrder = 3}, infoPage)
+local function createInfoCard(title, valueText, layoutOrder)
+    local card = make("Frame", {
+        Size = UDim2.new(1, 0, 0, 52),
+        BackgroundColor3 = Color3.fromRGB(18, 18, 22),
+        BorderSizePixel = 0,
+        LayoutOrder = layoutOrder or 0,
+    }, infoPage)
+    make("UICorner", {CornerRadius = UDim.new(0, 6)}, card)
+    make("UIStroke", {Color = GRAY, Transparency = 0.7, Thickness = 1}, card)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, -16, 0, 18),
+        Position = UDim2.fromOffset(8, 6),
+        BackgroundTransparency = 1,
+        Text = title,
+        TextColor3 = GRAY,
+        Font = Enum.Font.GothamBold,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, card)
+
+    local valLbl = make("TextLabel", {
+        Size = UDim2.new(1, -16, 0, 22),
+        Position = UDim2.fromOffset(8, 24),
+        BackgroundTransparency = 1,
+        Text = valueText,
+        TextColor3 = WHITE,
+        Font = Enum.Font.GothamBold,
+        TextSize = 13,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, card)
+
+    return valLbl
+end
+
+local executorName = "Desconhecido"
+pcall(function()
+    if identifyexecutor then
+        executorName = identifyexecutor()
+    elseif getexecutorname then
+        executorName = getexecutorname()
+    elseif syn then
+        executorName = "Synapse X"
+    elseif KRNL_LOADED then
+        executorName = "KRNL"
+    elseif DeltaLoaded then
+        executorName = "Delta"
+    elseif Fluxus then
+        executorName = "Fluxus"
+    end
+end)
+
+local envCapabilities = {}
+if writefile then table.insert(envCapabilities, "writefile") end
+if readfile then table.insert(envCapabilities, "readfile") end
+if getgenv then table.insert(envCapabilities, "getgenv") end
+if drawingmanager or Drawing then table.insert(envCapabilities, "Drawing API") end
+local execDetails = string.format("%s (%d funções suportadas)", executorName, #envCapabilities)
+
+createInfoCard("EXECUTOR UTILIZADO", execDetails, 1)
+
+local platformInfo = "Computador / Desktop"
+if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+    platformInfo = "Dispositivo Móvel (Celular / Tablet Touch)"
+elseif UserInputService.GamepadEnabled then
+    platformInfo = "Console / Controle (Gamepad)"
+end
+
+local osDetails = "Plataforma Padrão Roblox"
+pcall(function()
+    if UserInputService:GetPlatform() == Enum.Platform.IOS then
+        osDetails = "Apple iOS (iPhone / iPad)"
+    elseif UserInputService:GetPlatform() == Enum.Platform.Android then
+        osDetails = "Android OS"
+    elseif UserInputService:GetPlatform() == Enum.Platform.Windows then
+        osDetails = "Windows PC"
+    elseif UserInputService:GetPlatform() == Enum.Platform.OSX then
+        osDetails = "MacOS"
+    end
+end)
+
+local fullDeviceDescription = string.format("%s | %s", platformInfo, osDetails)
+createInfoCard("DISPOSITIVO DETECTADO", fullDeviceDescription, 2)
+
+local playerDetails = string.format("User: %s (ID: %d)", localPlayer.Name, localPlayer.UserId)
+createInfoCard("CONTA CONECTADA", playerDetails, 3)
+
+local gameDetails = string.format("Place ID: %d | Job ID Ativo", game.PlaceId)
+createInfoCard("INFORMAÇÕES DO SERVIDOR", gameDetails, 4)
+
+-- Botão FECHAR PAINEL DEFINITIVAMENTE na aba Info
+local destroyPanelBtn = make("TextButton", {
+    Size = UDim2.new(1, 0, 0, 42),
+    BackgroundColor3 = Color3.fromRGB(50, 20, 20),
+    Text = "FECHAR PAINEL DEFINITIVAMENTE",
+    TextColor3 = Color3.fromRGB(255, 90, 90),
+    Font = Enum.Font.GothamBold,
+    TextSize = 13,
+    BorderSizePixel = 0,
+    LayoutOrder = 5,
+}, infoPage)
+make("UICorner", {CornerRadius = UDim.new(0, 6)}, destroyPanelBtn)
+make("UIStroke", {Color = Color3.fromRGB(220, 50, 50), Transparency = 0.4, Thickness = 1}, destroyPanelBtn)
+
+destroyPanelBtn.MouseButton1Click:Connect(function()
+    TweenService:Create(main, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+        Size = UDim2.fromOffset(0, 0),
+        Position = UDim2.new(0.5, 0, 0.5, 0)
+    }):Play()
+    main.Visible = false
+
+    showClosedNotification()
+    task.delay(3.2, function()
+        pcall(function() gui:Destroy() end)
+    end)
+end)
+
+local rejoinButton = make("TextButton", {Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = CHECK_BG_OFF, Text = "Reentrar no Servidor (Rejoin)", TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 13, BorderSizePixel = 0, LayoutOrder = 6}, infoPage)
 make("UICorner", {CornerRadius = UDim.new(0, 6)}, rejoinButton)
 make("UIStroke", {Color = GRAY, Transparency = 0.5, Thickness = 1}, rejoinButton)
 
@@ -801,7 +1408,21 @@ rejoinButton.MouseButton1Click:Connect(function()
 end)
 
 switchTab("Aimbot")
-closeBtn.MouseButton1Click:Connect(function() main.Visible = false end)
+
+-- Botão X no topo do painel agora minimiza e mostra a notificação respeitando o timer de 5s
+closeBtn.MouseButton1Click:Connect(function()
+    local bindName = tostring(getgenv().RedAimBind.Name)
+    
+    local closeTween = TweenService:Create(main, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+        Size = UDim2.fromOffset(0, 0),
+        Position = UDim2.new(0.5, 0, 0.5, 0)
+    })
+    closeTween:Play()
+    closeTween.Completed:Wait()
+    main.Visible = false
+
+    showMinifiedNotification(bindName)
+end)
 
 local dragging, dragStart, startPos
 header.InputBegan:Connect(function(input)
