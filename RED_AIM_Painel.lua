@@ -1,27 +1,61 @@
--- RED AIM - Painel Completo Otimizado & Timer de 5 Segundos para Minimizar
+-- RED AIM - Script Completo, Otimizado e Anti-Loop de Notificações
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
 local Camera = workspace.CurrentCamera
 local localPlayer = Players.LocalPlayer
 
 local playerGui = localPlayer:WaitForChild("PlayerGui")
-local oldGui = playerGui:FindFirstChild("RedAimGui")
-if oldGui then
-    oldGui:Destroy()
-end
+
+-- SISTEMA ANTI-DUPLICAÇÃO: Remove qualquer painel anterior antes de criar um novo
+pcall(function()
+    for _, guiObj in ipairs(playerGui:GetChildren()) do
+        if guiObj.Name == "RedAimGui" then
+            guiObj:Destroy()
+        end
+    end
+    for _, guiObj in ipairs(CoreGui:GetChildren()) do
+        if guiObj.Name == "RedAimGui" then
+            guiObj:Destroy()
+        end
+    end
+    if gethui then
+        for _, guiObj in ipairs(gethui():GetChildren()) do
+            if guiObj.Name == "RedAimGui" then
+                guiObj:Destroy()
+            end
+        end
+    end
+end)
+
+local targetParent = playerGui
+pcall(function()
+    if gethui then
+        targetParent = gethui()
+    else
+        targetParent = CoreGui
+    end
+end)
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "RedAimGui"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.DisplayOrder = 999999
-gui.Parent = playerGui
+gui.Parent = targetParent
 
--- Círculo do FOV Fixo no Centro
+pcall(function()
+    if syn and syn.protect_gui then
+        syn.protect_gui(gui)
+    elseif protectgui then
+        protectgui(gui)
+    end
+end)
+
 local fovCircle = Instance.new("Frame")
 fovCircle.Name = "FOVCircle"
 fovCircle.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -40,8 +74,9 @@ local fovCorner = Instance.new("UICorner")
 fovCorner.CornerRadius = UDim.new(1, 0)
 fovCorner.Parent = fovCircle
 
--- Configurações Globais
 getgenv().RedAimBind = Enum.KeyCode.Insert
+getgenv().WallCheckBind = Enum.KeyCode.Unknown 
+
 getgenv().RedAimConfig = {
     AimbotEnabled = false,
     TargetPart = nil,     
@@ -59,9 +94,9 @@ getgenv().RedAimConfig = {
     EspName = false,      
     EspDistancia = false, 
     EspTeamCheck = false,
+    OcultarStream = false,
 }
 
--- Sistema de Perfis Múltiplos (Até 5 Slots)
 getgenv().RedAimProfiles = getgenv().RedAimProfiles or {
     {name = "Perfil 1 (Vazio)", config = {}},
     {name = "Perfil 2 (Vazio)", config = {}},
@@ -70,13 +105,24 @@ getgenv().RedAimProfiles = getgenv().RedAimProfiles or {
     {name = "Perfil 5 (Vazio)", config = {}},
 }
 
-local profilesFileName = "RedAim_Profiles_v2.json"
+local profilesFileName = "RedAim_Profiles_v3.json"
 local currentSelectedSlot = 1
 
 local function saveAllProfiles()
     pcall(function()
         if writefile then
-            local data = HttpService:JSONEncode(getgenv().RedAimProfiles)
+            local profilesToSave = {}
+            for i, prof in ipairs(getgenv().RedAimProfiles) do
+                local cfgCopy = {}
+                for k, v in pairs(prof.config) do
+                    cfgCopy[k] = v
+                end
+                if cfgCopy.WallCheckBindName then
+                    cfgCopy.WallCheckBindName = tostring(cfgCopy.WallCheckBindName)
+                end
+                table.insert(profilesToSave, {name = prof.name, config = cfgCopy})
+            end
+            local data = HttpService:JSONEncode(profilesToSave)
             writefile(profilesFileName, data)
         end
     end)
@@ -88,6 +134,14 @@ local function loadAllProfiles()
             local content = readfile(profilesFileName)
             local data = HttpService:JSONDecode(content)
             if type(data) == "table" then
+                for i, prof in ipairs(data) do
+                    if prof.config and prof.config.WallCheckBindName then
+                        local keyName = prof.config.WallCheckBindName
+                        pcall(function()
+                            prof.config.WallCheckBindName = Enum.KeyCode[keyName]
+                        end)
+                    end
+                end
                 getgenv().RedAimProfiles = data
             end
         end
@@ -96,7 +150,6 @@ end
 
 loadAllProfiles()
 
--- ==================== MOTOR DE LÓGICA (AIMBOT & ESP) ====================
 local activeEsp = {}
 local activeHighlights = {}
 
@@ -111,6 +164,13 @@ local function cleanEsp(player)
         pcall(function() activeHighlights[player]:Destroy() end)
         activeHighlights[player] = nil
     end
+end
+
+local function clearAllEspAndVisuals()
+    for p, _ in pairs(activeEsp) do
+        cleanEsp(p)
+    end
+    fovCircle.Visible = false
 end
 
 local function getEsp(player)
@@ -175,6 +235,9 @@ local function isValidTarget(targetPlayer)
         if targetPlayer.Team and localPlayer.Team and targetPlayer.Team == localPlayer.Team then
             return false
         end
+        if targetPlayer.TeamColor and localPlayer.TeamColor and targetPlayer.TeamColor == localPlayer.TeamColor then
+            return false
+        end
     end
     return true
 end
@@ -228,17 +291,17 @@ local function getClosestPlayerWithinFOV()
     return closest
 end
 
--- Render Loop Ultra Rápido
 RunService:BindToRenderStep("RedAimEngine", Enum.RenderPriority.Camera.Value + 1, function()
-    if getgenv().RedAimConfig.ExibirFOV then
+    local config = getgenv().RedAimConfig
+
+    if config.ExibirFOV then
         fovCircle.Visible = true
-        local size = getgenv().RedAimConfig.FOVValue * 2
+        local size = config.FOVValue * 2
         fovCircle.Size = UDim2.fromOffset(size, size)
     else
         fovCircle.Visible = false
     end
 
-    local config = getgenv().RedAimConfig
     if config.AimbotEnabled and config.TargetPart and config.AimMode then
         local target = getClosestPlayerWithinFOV()
         if target then
@@ -353,16 +416,18 @@ RunService:BindToRenderStep("RedAimEngine", Enum.RenderPriority.Camera.Value + 1
                         end
 
                         local inRange = false
+                        local metersDist = 0
                         if myRoot then
                             local distance = (myRoot.Position - rootPart.Position).Magnitude
-                            if distance <= 35 then
+                            metersDist = math.floor(distance * 0.28)
+                            if metersDist <= 30 then
                                 inRange = true
                             end
                         end
 
                         if config.EspName and inRange then
                             esp.nameText.Visible = true
-                            esp.nameText.Text = p.Name
+                            esp.nameText.Text = p.Name .. " [" .. tostring(metersDist) .. "m]"
                             esp.nameText.Position = Vector2.new(rootPos.X, headPos.Y - 18)
                         else
                             esp.nameText.Visible = false
@@ -370,9 +435,9 @@ RunService:BindToRenderStep("RedAimEngine", Enum.RenderPriority.Camera.Value + 1
 
                         if config.EspDistancia and myRoot then
                             local studsDist = (myRoot.Position - rootPart.Position).Magnitude
-                            local metersDist = math.floor(studsDist * 0.28)
+                            local distMeters = math.floor(studsDist * 0.28)
                             esp.distText.Visible = true
-                            esp.distText.Text = tostring(metersDist) .. "m"
+                            esp.distText.Text = tostring(distMeters) .. "m"
                             esp.distText.Position = Vector2.new(rootPos.X, legPos.Y + 4)
                         else
                             esp.distText.Visible = false
@@ -403,22 +468,21 @@ RunService:BindToRenderStep("RedAimEngine", Enum.RenderPriority.Camera.Value + 1
     end
 end)
 
--- ==================== INTERFACE GRÁFICA (UI) ====================
 local themes = {
-    {name = "Vermelho", main = Color3.fromRGB(220, 20, 30), dark = Color3.fromRGB(120, 10, 15)},
-    {name = "Azul", main = Color3.fromRGB(20, 100, 220), dark = Color3.fromRGB(10, 50, 120)},
-    {name = "Verde", main = Color3.fromRGB(20, 200, 50), dark = Color3.fromRGB(10, 100, 25)},
-    {name = "Roxo", main = Color3.fromRGB(140, 30, 220), dark = Color3.fromRGB(70, 15, 120)}
+    {name = "Vermelho", main = Color3.fromRGB(220, 20, 30), dark = Color3.fromRGB(80, 5, 10)},
+    {name = "Azul", main = Color3.fromRGB(20, 100, 220), dark = Color3.fromRGB(5, 30, 80)},
+    {name = "Verde", main = Color3.fromRGB(20, 200, 50), dark = Color3.fromRGB(5, 60, 15)},
+    {name = "Roxo", main = Color3.fromRGB(140, 30, 220), dark = Color3.fromRGB(45, 10, 80)}
 }
 local currentThemeIndex = 1
 local currentTheme = themes[currentThemeIndex]
 
-local BLACK = Color3.fromRGB(15, 15, 18)
-local PANEL_BG = Color3.fromRGB(25, 25, 28)
-local TAB_BG = Color3.fromRGB(35, 35, 40)
+local BLACK = Color3.fromRGB(0, 0, 0)
+local PANEL_BG = Color3.fromRGB(0, 0, 0)
+local TAB_BG = Color3.fromRGB(40, 40, 45)
 local WHITE = Color3.fromRGB(245, 245, 245)
 local GRAY = Color3.fromRGB(160, 160, 165)
-local CHECK_BG_OFF = Color3.fromRGB(45, 45, 50)
+local CHECK_BG_OFF = Color3.fromRGB(30, 30, 30)
 local CHECK_BG_ON  = Color3.fromRGB(30, 70, 45)
 local CHECK_GREEN  = Color3.fromRGB(40, 220, 90)
 
@@ -541,8 +605,14 @@ end
 local function switchTab(selectedName)
     for name, page in pairs(pages) do page.Visible = (name == selectedName) end
     for name, btn in pairs(tabButtons) do
-        btn.BackgroundColor3 = (name == selectedName) and currentTheme.main or TAB_BG
-        btn.TextColor3 = (name == selectedName) and WHITE or GRAY
+        local isSel = (name == selectedName)
+        btn.BackgroundColor3 = isSel and currentTheme.main or TAB_BG
+        btn.TextColor3 = isSel and WHITE or WHITE
+        local stroke = btn:FindFirstChildOfClass("UIStroke")
+        if stroke then
+            stroke.Color = isSel and currentTheme.main or GRAY
+            stroke.Transparency = isSel and 0 or 0.4
+        end
     end
 end
 
@@ -552,13 +622,14 @@ for i, name in ipairs(tabNames) do
         Size = UDim2.new(0.25, -5, 1, 0),
         BackgroundColor3 = TAB_BG,
         Text = name,
-        TextColor3 = GRAY,
+        TextColor3 = WHITE,
         Font = Enum.Font.GothamBold,
         TextSize = 13,
         BorderSizePixel = 0,
         LayoutOrder = i,
     }, tabBar)
     make("UICorner", {CornerRadius = UDim.new(0, 6)}, btn)
+    make("UIStroke", {Color = GRAY, Transparency = 0.4, Thickness = 1}, btn)
     btn.MouseButton1Click:Connect(function() switchTab(name) end)
     tabButtons[name] = btn
 end
@@ -567,6 +638,7 @@ local checkboxUpdaters = {}
 local targetPartUpdaters = nil
 local aimModeUpdaters = nil
 local fovCheckboxUpdate = nil
+local bindingWallCheckKey = false
 
 local function createCheckbox(parent, text, configKey, layoutOrder)
     local frame = make("Frame", {Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = layoutOrder or 0}, parent)
@@ -581,8 +653,9 @@ local function createCheckbox(parent, text, configKey, layoutOrder)
     make("UICorner", {CornerRadius = UDim.new(0, 6)}, box)
     make("UIStroke", {Color = GRAY, Transparency = 0.5, Thickness = 1}, box)
     
+    local lblWidth = (configKey == "WallCheck") and UDim2.new(1, -126, 1, 0) or UDim2.new(1, -36, 1, 0)
     local lbl = make("TextButton", {
-        Size = UDim2.new(1, -36, 1, 0), Position = UDim2.fromOffset(36, 0),
+        Size = lblWidth, Position = UDim2.fromOffset(36, 0),
         BackgroundTransparency = 1, Text = text, TextColor3 = WHITE,
         Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left,
     }, frame)
@@ -614,6 +687,37 @@ local function createCheckbox(parent, text, configKey, layoutOrder)
             getgenv().RedAimConfig.ExibirFOV = state
             box.BackgroundColor3 = state and CHECK_BG_ON or CHECK_BG_OFF
             box.Text = state and "✓" or ""
+        end
+    end
+
+    if configKey == "WallCheck" then
+        local keybindBtn = make("TextButton", {
+            Size = UDim2.fromOffset(80, 26),
+            Position = UDim2.new(1, -80, 0, 3),
+            BackgroundColor3 = CHECK_BG_OFF,
+            Text = (getgenv().WallCheckBind == Enum.KeyCode.Unknown) and "[Tecla]" or "[" .. getgenv().WallCheckBind.Name .. "]",
+            TextColor3 = (getgenv().WallCheckBind == Enum.KeyCode.Unknown) and GRAY or CHECK_GREEN,
+            Font = Enum.Font.GothamBold,
+            TextSize = 12,
+            BorderSizePixel = 0,
+        }, frame)
+        make("UICorner", {CornerRadius = UDim.new(0, 6)}, keybindBtn)
+        make("UIStroke", {Color = GRAY, Transparency = 0.5, Thickness = 1}, keybindBtn)
+
+        keybindBtn.MouseButton1Click:Connect(function()
+            bindingWallCheckKey = true
+            keybindBtn.Text = "Pressione..."
+            keybindBtn.TextColor3 = WHITE
+        end)
+
+        getgenv().UpdateWallCheckKeyText = function()
+            if getgenv().WallCheckBind == Enum.KeyCode.Unknown then
+                keybindBtn.Text = "[Tecla]"
+                keybindBtn.TextColor3 = GRAY
+            else
+                keybindBtn.Text = "[" .. getgenv().WallCheckBind.Name .. "]"
+                keybindBtn.TextColor3 = CHECK_GREEN
+            end
         end
     end
 
@@ -768,7 +872,7 @@ end
 local sliderFills = {}
 local function createLeveSmoothSlider(parent, layoutOrder)
     local frame = make("Frame", {Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1, LayoutOrder = layoutOrder or 0}, parent)
-    local sliderBg = make("Frame", {Size = UDim2.new(1, -130, 0, 26), Position = UDim2.fromOffset(0, 9), BackgroundColor3 = Color3.fromRGB(18, 18, 22), BorderSizePixel = 0}, frame)
+    local sliderBg = make("Frame", {Size = UDim2.new(1, -130, 0, 26), Position = UDim2.fromOffset(0, 9), BackgroundColor3 = Color3.fromRGB(15, 15, 15), BorderSizePixel = 0}, frame)
     make("UICorner", {CornerRadius = UDim.new(0, 5)}, sliderBg)
     make("UIStroke", {Color = GRAY, Transparency = 0.7, Thickness = 1}, sliderBg)
 
@@ -805,7 +909,7 @@ end
 
 local function createFovSlider(parent, layoutOrder)
     local frame = make("Frame", {Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1, LayoutOrder = layoutOrder or 0}, parent)
-    local sliderBg = make("Frame", {Size = UDim2.new(1, -110, 0, 26), Position = UDim2.fromOffset(0, 9), BackgroundColor3 = Color3.fromRGB(18, 18, 22), BorderSizePixel = 0}, frame)
+    local sliderBg = make("Frame", {Size = UDim2.new(1, -110, 0, 26), Position = UDim2.fromOffset(0, 9), BackgroundColor3 = Color3.fromRGB(15, 15, 15), BorderSizePixel = 0}, frame)
     make("UICorner", {CornerRadius = UDim.new(0, 5)}, sliderBg)
     make("UIStroke", {Color = GRAY, Transparency = 0.7, Thickness = 1}, sliderBg)
 
@@ -861,9 +965,11 @@ createCheckbox(espPage, "ESP Distância", "EspDistancia", 7)
 createCheckbox(espPage, "Team Check", "EspTeamCheck", 8)
 
 local diversosPage = pages["Diversos"]
-make("TextLabel", {Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Text = "Tecla para abrir / fechar painel:", TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 1}, diversosPage)
 
-local bindButton = make("TextButton", {Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = CHECK_BG_OFF, Text = tostring(getgenv().RedAimBind.Name), TextColor3 = CHECK_GREEN, Font = Enum.Font.GothamBold, TextSize = 14, BorderSizePixel = 0, LayoutOrder = 2}, diversosPage)
+make("TextLabel", {Size = UDim2.new(1, 0, 0, 10), BackgroundTransparency = 1, Text = "", LayoutOrder = 1}, diversosPage)
+make("TextLabel", {Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Text = "Tecla para abrir / fechar painel:", TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 2}, diversosPage)
+
+local bindButton = make("TextButton", {Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = CHECK_BG_OFF, Text = tostring(getgenv().RedAimBind.Name), TextColor3 = CHECK_GREEN, Font = Enum.Font.GothamBold, TextSize = 14, BorderSizePixel = 0, LayoutOrder = 3}, diversosPage)
 make("UICorner", {CornerRadius = UDim.new(0, 6)}, bindButton)
 make("UIStroke", {Color = GRAY, Transparency = 0.5, Thickness = 1}, bindButton)
 
@@ -874,52 +980,125 @@ bindButton.MouseButton1Click:Connect(function()
     bindButton.TextColor3 = WHITE
 end)
 
--- Controle de Cooldown/Timer de 5 segundos para a notificação de minimizado
-local lastMinimizeTime = 0
+local activeWallCheckNotif = nil
 
--- Notificação de Minimizado (Com timer de segurança de 5 segundos)
-local function showMinifiedNotification(bindName)
-    local currentTime = tick()
-    if currentTime - lastMinimizeTime < 5 then
-        return -- Se fechou/abriu dentro do intervalo de 5 segundos, não exibe para não poluir
+-- Garante exclusividade: destrói imediatamente a notificação anterior antes de exibir a nova
+local function showWallCheckNotification(state)
+    if activeWallCheckNotif and activeWallCheckNotif.Parent then
+        pcall(function()
+            activeWallCheckNotif:Destroy()
+        end)
     end
-    lastMinimizeTime = currentTime
 
     local notif = make("Frame", {
-        Size = UDim2.fromOffset(400, 75),
-        Position = UDim2.new(0.5, -200, 0.75, 0),
-        BackgroundColor3 = Color3.fromRGB(22, 22, 28),
+        Size = UDim2.fromOffset(240, 46),
+        Position = UDim2.new(0.5, -120, 0.75, 12),
+        BackgroundColor3 = Color3.fromRGB(12, 12, 12),
         BorderSizePixel = 0,
         ZIndex = 999999,
     }, gui)
+    activeWallCheckNotif = notif
+
+    make("UICorner", {CornerRadius = UDim.new(0, 6)}, notif)
+    make("UIStroke", {Color = state and CHECK_GREEN or Color3.fromRGB(220, 50, 50), Thickness = 1.2}, notif)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 20),
+        Position = UDim2.fromOffset(0, 4),
+        BackgroundTransparency = 1,
+        Text = state and "Wall Check: ATIVADO" or "Wall Check: DESATIVADO",
+        TextColor3 = state and CHECK_GREEN or Color3.fromRGB(255, 90, 90),
+        Font = Enum.Font.GothamBold,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Center,
+        ZIndex = 1000000,
+    }, notif)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 18),
+        Position = UDim2.fromOffset(0, 22),
+        BackgroundTransparency = 1,
+        Text = state and "não puxando atras da parede" or "puxando atras da parede",
+        TextColor3 = state and GRAY or WHITE,
+        Font = Enum.Font.GothamBold,
+        TextSize = 10,
+        TextXAlignment = Enum.TextXAlignment.Center,
+        ZIndex = 1000000,
+    }, notif)
+
+    notif.Size = UDim2.fromOffset(0, 0)
+    notif.Position = UDim2.new(0.5, 0, 0.75, 35)
+    
+    local showTween = TweenService:Create(notif, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = UDim2.fromOffset(240, 46),
+        Position = UDim2.new(0.5, -120, 0.75, 12)
+    })
+    showTween:Play()
+
+    task.delay(1.2, function()
+        if activeWallCheckNotif == notif and notif.Parent then
+            pcall(function()
+                local hideTween = TweenService:Create(notif, TweenInfo.new(0.18, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+                    Size = UDim2.fromOffset(0, 0),
+                    Position = UDim2.new(0.5, 0, 0.75, 35)
+                })
+                hideTween:Play()
+                hideTween.Completed:Wait()
+                if activeWallCheckNotif == notif then
+                    activeWallCheckNotif = nil
+                end
+                notif:Destroy()
+            end)
+        end
+    end)
+end
+
+local activeMinifiedNotif = nil
+
+local function showMinifiedNotification(bindName)
+    if activeMinifiedNotif and activeMinifiedNotif.Parent then
+        pcall(function()
+            activeMinifiedNotif:Destroy()
+        end)
+    end
+
+    local notif = make("Frame", {
+        Size = UDim2.fromOffset(340, 60),
+        Position = UDim2.new(0.5, -170, 0.75, 0),
+        BackgroundColor3 = Color3.fromRGB(15, 15, 15),
+        BorderSizePixel = 0,
+        ZIndex = 999999,
+    }, gui)
+    activeMinifiedNotif = notif
+
     make("UICorner", {CornerRadius = UDim.new(0, 8)}, notif)
     make("UIStroke", {Color = currentTheme.main, Thickness = 1.5}, notif)
 
     make("TextLabel", {
-        Size = UDim2.new(1, 0, 0, 26),
-        Position = UDim2.new(0, 0, 0, 10),
+        Size = UDim2.new(1, 0, 0, 22),
+        Position = UDim2.new(0, 0, 0, 8),
         BackgroundTransparency = 1,
         Text = "Minimizado!",
         TextColor3 = currentTheme.main,
         Font = Enum.Font.GothamBold,
-        TextSize = 16,
+        TextSize = 14,
         TextXAlignment = Enum.TextXAlignment.Center,
         ZIndex = 1000000,
     }, notif)
 
     local lineContainer = make("Frame", {
-        Size = UDim2.new(1, 0, 0, 24),
-        Position = UDim2.new(0, 0, 0, 38),
+        Size = UDim2.new(1, 0, 0, 20),
+        Position = UDim2.new(0, 0, 0, 32),
         BackgroundTransparency = 1,
         ZIndex = 1000000,
     }, notif)
 
     local part1 = "aperte "
     local keyText = bindName
-    local part2 = " para abrir o painel novamente"
+    local part2 = " para abrir o painel"
 
     local font = Enum.Font.GothamBold
-    local textSize = 12
+    local textSize = 11
 
     local t1Label = make("TextLabel", {
         BackgroundTransparency = 1,
@@ -957,39 +1136,43 @@ local function showMinifiedNotification(bindName)
     RunService.RenderStepped:Wait()
     local totalWidth = t1Label.AbsoluteSize.X + keyLabel.AbsoluteSize.X + t2Label.AbsoluteSize.X
 
-    local startX = (400 - totalWidth) / 2
+    local startX = (340 - totalWidth) / 2
     t1Label.Position = UDim2.new(0, startX, 0, 0)
     keyLabel.Position = UDim2.new(0, startX + t1Label.AbsoluteSize.X, 0, 0)
     t2Label.Position = UDim2.new(0, startX + t1Label.AbsoluteSize.X + keyLabel.AbsoluteSize.X, 0, 0)
 
     notif.Size = UDim2.fromOffset(0, 0)
-    notif.Position = UDim2.new(0.5, 0, 0.75, 37)
+    notif.Position = UDim2.new(0.5, 0, 0.75, 30)
     
     local showTween = TweenService:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Size = UDim2.fromOffset(400, 75),
-        Position = UDim2.new(0.5, -200, 0.75, 0)
+        Size = UDim2.fromOffset(340, 60),
+        Position = UDim2.new(0.5, -170, 0.75, 0)
     })
     showTween:Play()
 
-    task.delay(3, function()
-        pcall(function()
-            local hideTween = TweenService:Create(notif, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-                Size = UDim2.fromOffset(0, 0),
-                Position = UDim2.new(0.5, 0, 0.75, 37)
-            })
-            hideTween:Play()
-            hideTween.Completed:Wait()
-            notif:Destroy()
-        end)
+    task.delay(2.5, function()
+        if activeMinifiedNotif == notif and notif.Parent then
+            pcall(function()
+                local hideTween = TweenService:Create(notif, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+                    Size = UDim2.fromOffset(0, 0),
+                    Position = UDim2.new(0.5, 0, 0.75, 30)
+                })
+                hideTween:Play()
+                hideTween.Completed:Wait()
+                if activeMinifiedNotif == notif then
+                    activeMinifiedNotif = nil
+                end
+                notif:Destroy()
+            end)
+        end
     end)
 end
 
--- Notificação de Fechado com Sucesso (Exclusiva do Fechamento Definitivo)
 local function showClosedNotification()
     local notif = make("Frame", {
-        Size = UDim2.fromOffset(360, 60),
-        Position = UDim2.new(0.5, -180, 0.75, 0),
-        BackgroundColor3 = Color3.fromRGB(22, 22, 28),
+        Size = UDim2.fromOffset(320, 50),
+        Position = UDim2.new(0.5, -160, 0.75, 0),
+        BackgroundColor3 = Color3.fromRGB(15, 15, 15),
         BorderSizePixel = 0,
         ZIndex = 999999,
     }, gui)
@@ -998,30 +1181,30 @@ local function showClosedNotification()
 
     make("TextLabel", {
         Size = UDim2.new(1, 0, 1, 0),
-        Position = UDim2.new(0, 0, 0, 0),
+        Position = UDim2.fromOffset(0, 0),
         BackgroundTransparency = 1,
         Text = "Fechado com sucesso!",
         TextColor3 = CHECK_GREEN,
         Font = Enum.Font.GothamBold,
-        TextSize = 15,
+        TextSize = 13,
         TextXAlignment = Enum.TextXAlignment.Center,
         ZIndex = 1000000,
     }, notif)
 
     notif.Size = UDim2.fromOffset(0, 0)
-    notif.Position = UDim2.new(0.5, 0, 0.75, 30)
+    notif.Position = UDim2.new(0.5, 0, 0.75, 25)
     
     local showTween = TweenService:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Size = UDim2.fromOffset(360, 60),
-        Position = UDim2.new(0.5, -180, 0.75, 0)
+        Size = UDim2.fromOffset(320, 50),
+        Position = UDim2.new(0.5, -160, 0.75, 0)
     })
     showTween:Play()
 
-    task.delay(3, function()
+    task.delay(2.5, function()
         pcall(function()
             local hideTween = TweenService:Create(notif, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
                 Size = UDim2.fromOffset(0, 0),
-                Position = UDim2.new(0.5, 0, 0.75, 30)
+                Position = UDim2.new(0.5, 0, 0.75, 25)
             })
             hideTween:Play()
             hideTween.Completed:Wait()
@@ -1037,6 +1220,23 @@ UserInputService.InputBegan:Connect(function(input, processed)
         bindButton.TextColor3 = CHECK_GREEN
         bindingKey = false
         return
+    end
+
+    if bindingWallCheckKey and input.UserInputType == Enum.UserInputType.Keyboard then
+        getgenv().WallCheckBind = input.KeyCode
+        if getgenv().UpdateWallCheckKeyText then
+            getgenv().UpdateWallCheckKeyText()
+        end
+        bindingWallCheckKey = false
+        return
+    end
+
+    if not processed and getgenv().WallCheckBind ~= Enum.KeyCode.Unknown and input.KeyCode == getgenv().WallCheckBind then
+        getgenv().RedAimConfig.WallCheck = not getgenv().RedAimConfig.WallCheck
+        if checkboxUpdaters["WallCheck"] then
+            checkboxUpdaters["WallCheck"](getgenv().RedAimConfig.WallCheck)
+        end
+        showWallCheckNotification(getgenv().RedAimConfig.WallCheck)
     end
 
     if not processed and input.KeyCode == getgenv().RedAimBind then
@@ -1063,14 +1263,13 @@ UserInputService.InputBegan:Connect(function(input, processed)
     end
 end)
 
-make("TextLabel", {Size = UDim2.new(1, 0, 0, 10), BackgroundTransparency = 1, Text = "", LayoutOrder = 3}, diversosPage)
+make("TextLabel", {Size = UDim2.new(1, 0, 0, 10), BackgroundTransparency = 1, Text = "", LayoutOrder = 4}, diversosPage)
 
--- Container Estilizado para Perfis
 local profileContainer = make("Frame", {
     Size = UDim2.new(1, 0, 0, 155),
-    BackgroundColor3 = Color3.fromRGB(18, 18, 22),
+    BackgroundColor3 = Color3.fromRGB(12, 12, 12),
     BorderSizePixel = 0,
-    LayoutOrder = 4,
+    LayoutOrder = 5,
 }, diversosPage)
 make("UICorner", {CornerRadius = UDim.new(0, 8)}, profileContainer)
 make("UIStroke", {Color = GRAY, Transparency = 0.7, Thickness = 1}, profileContainer)
@@ -1097,7 +1296,7 @@ local slotButtons = {}
 for i = 1, 5 do
     local sBtn = make("TextButton", {
         Size = UDim2.new(0.2, -5, 1, 0),
-        BackgroundColor3 = (i == currentSelectedSlot) and Color3.fromRGB(35, 35, 45) or Color3.fromRGB(24, 24, 30),
+        BackgroundColor3 = (i == currentSelectedSlot) and Color3.fromRGB(35, 35, 45) or Color3.fromRGB(20, 20, 20),
         Text = tostring(i),
         TextColor3 = (i == currentSelectedSlot) and WHITE or GRAY,
         Font = Enum.Font.GothamBold,
@@ -1113,7 +1312,7 @@ end
 local profileNameBox = make("TextBox", {
     Size = UDim2.new(1, -20, 0, 32),
     Position = UDim2.fromOffset(10, 76),
-    BackgroundColor3 = Color3.fromRGB(12, 12, 15),
+    BackgroundColor3 = Color3.fromRGB(8, 8, 8),
     Text = getgenv().RedAimProfiles[currentSelectedSlot].name,
     TextColor3 = WHITE,
     PlaceholderText = "Nome do perfil...",
@@ -1133,18 +1332,18 @@ local actionRow = make("Frame", {
 }, profileContainer)
 make("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4)}, actionRow)
 
-local saveProfileBtn = make("TextButton", {
+local loadProfileBtn = make("TextButton", {
     Size = UDim2.new(0.33, -3, 1, 0),
-    BackgroundColor3 = Color3.fromRGB(24, 45, 30),
-    Text = "Salvar",
-    TextColor3 = CHECK_GREEN,
+    BackgroundColor3 = Color3.fromRGB(45, 45, 55),
+    Text = "Carregar",
+    TextColor3 = WHITE,
     Font = Enum.Font.GothamBold,
     TextSize = 11,
     BorderSizePixel = 0,
     LayoutOrder = 1,
 }, actionRow)
-make("UICorner", {CornerRadius = UDim.new(0, 6)}, saveProfileBtn)
-make("UIStroke", {Color = CHECK_GREEN, Transparency = 0.4, Thickness = 1}, saveProfileBtn)
+make("UICorner", {CornerRadius = UDim.new(0, 6)}, loadProfileBtn)
+make("UIStroke", {Color = WHITE, Transparency = 0.3, Thickness = 1}, loadProfileBtn)
 
 local resetProfileBtn = make("TextButton", {
     Size = UDim2.new(0.33, -3, 1, 0),
@@ -1159,25 +1358,25 @@ local resetProfileBtn = make("TextButton", {
 make("UICorner", {CornerRadius = UDim.new(0, 6)}, resetProfileBtn)
 make("UIStroke", {Color = Color3.fromRGB(220, 50, 50), Transparency = 0.4, Thickness = 1}, resetProfileBtn)
 
-local loadProfileBtn = make("TextButton", {
+local saveProfileBtn = make("TextButton", {
     Size = UDim2.new(0.33, -3, 1, 0),
-    BackgroundColor3 = Color3.fromRGB(28, 28, 35),
-    Text = "Carregar",
-    TextColor3 = WHITE,
+    BackgroundColor3 = Color3.fromRGB(24, 45, 30),
+    Text = "Salvar",
+    TextColor3 = CHECK_GREEN,
     Font = Enum.Font.GothamBold,
     TextSize = 11,
     BorderSizePixel = 0,
     LayoutOrder = 3,
 }, actionRow)
-make("UICorner", {CornerRadius = UDim.new(0, 6)}, loadProfileBtn)
-make("UIStroke", {Color = GRAY, Transparency = 0.5, Thickness = 1}, loadProfileBtn)
+make("UICorner", {CornerRadius = UDim.new(0, 6)}, saveProfileBtn)
+make("UIStroke", {Color = CHECK_GREEN, Transparency = 0.4, Thickness = 1}, saveProfileBtn)
 
 for i = 1, 5 do
     slotButtons[i].MouseButton1Click:Connect(function()
         currentSelectedSlot = i
         for idx, btn in ipairs(slotButtons) do
             local isSel = (idx == i)
-            btn.BackgroundColor3 = isSel and Color3.fromRGB(35, 35, 45) or Color3.fromRGB(24, 24, 30)
+            btn.BackgroundColor3 = isSel and Color3.fromRGB(35, 35, 45) or Color3.fromRGB(20, 20, 20)
             btn.TextColor3 = isSel and WHITE or GRAY
             local stroke = btn:FindFirstChildOfClass("UIStroke")
             if stroke then
@@ -1197,6 +1396,7 @@ saveProfileBtn.MouseButton1Click:Connect(function()
     for k, v in pairs(getgenv().RedAimConfig) do
         configCopy[k] = v
     end
+    configCopy.WallCheckBindName = (getgenv().WallCheckBind ~= Enum.KeyCode.Unknown) and getgenv().WallCheckBind.Name or "Unknown"
     
     getgenv().RedAimProfiles[currentSelectedSlot] = {
         name = nameInput,
@@ -1226,10 +1426,23 @@ loadProfileBtn.MouseButton1Click:Connect(function()
     local targetProfile = getgenv().RedAimProfiles[currentSelectedSlot]
     if targetProfile and targetProfile.config and next(targetProfile.config) ~= nil then
         for k, v in pairs(targetProfile.config) do
-            getgenv().RedAimConfig[k] = v
-            if checkboxUpdaters[k] then
-                checkboxUpdaters[k](v)
+            if k ~= "WallCheckBindName" then
+                getgenv().RedAimConfig[k] = v
+                if checkboxUpdaters[k] then
+                    checkboxUpdaters[k](v)
+                end
             end
+        end
+        if targetProfile.config.WallCheckBindName then
+            local kName = tostring(targetProfile.config.WallCheckBindName)
+            pcall(function()
+                getgenv().WallCheckBind = Enum.KeyCode[kName] or Enum.KeyCode.Unknown
+            end)
+        else
+            getgenv().WallCheckBind = Enum.KeyCode.Unknown
+        end
+        if getgenv().UpdateWallCheckKeyText then
+            getgenv().UpdateWallCheckKeyText()
         end
         if targetPartUpdaters then
             targetPartUpdaters(getgenv().RedAimConfig.TargetPart)
@@ -1248,10 +1461,10 @@ loadProfileBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-make("TextLabel", {Size = UDim2.new(1, 0, 0, 10), BackgroundTransparency = 1, Text = "", LayoutOrder = 5}, diversosPage)
-make("TextLabel", {Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Text = "Cor da interface", TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 6}, diversosPage)
+make("TextLabel", {Size = UDim2.new(1, 0, 0, 10), BackgroundTransparency = 1, Text = "", LayoutOrder = 6}, diversosPage)
+make("TextLabel", {Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Text = "Cor da interface", TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 7}, diversosPage)
 
-local themeButton = make("TextButton", {Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = CHECK_BG_OFF, Text = currentTheme.name, TextColor3 = currentTheme.main, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Center, BorderSizePixel = 0, LayoutOrder = 7}, diversosPage)
+local themeButton = make("TextButton", {Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = CHECK_BG_OFF, Text = currentTheme.name, TextColor3 = currentTheme.main, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Center, BorderSizePixel = 0, LayoutOrder = 8}, diversosPage)
 make("UICorner", {CornerRadius = UDim.new(0, 6)}, themeButton)
 local themeStroke = make("UIStroke", {Color = GRAY, Transparency = 0.5, Thickness = 1}, themeButton)
 
@@ -1264,22 +1477,15 @@ themeButton.MouseButton1Click:Connect(function()
     themeButton.TextColor3 = currentTheme.main
     fovStroke.Color = currentTheme.main
     for _, h in ipairs(sliderFills) do h.BackgroundColor3 = currentTheme.main end
-    for _, b in pairs(tabButtons) do if b.BackgroundColor3 ~= TAB_BG then b.BackgroundColor3 = currentTheme.main end end
-    
-    local selBtn = slotButtons[currentSelectedSlot]
-    if selBtn then
-        local str = selBtn:FindFirstChildOfClass("UIStroke")
-        if str then str.Color = currentTheme.main end
-    end
+    switchTab("Aimbot")
 end)
 
--- ==================== ABA INFO DETALHADA COM FECHAR PAINEL ====================
 local infoPage = pages["Info"]
 
 local function createInfoCard(title, valueText, layoutOrder)
     local card = make("Frame", {
         Size = UDim2.new(1, 0, 0, 52),
-        BackgroundColor3 = Color3.fromRGB(18, 18, 22),
+        BackgroundColor3 = Color3.fromRGB(12, 12, 12),
         BorderSizePixel = 0,
         LayoutOrder = layoutOrder or 0,
     }, infoPage)
@@ -1366,7 +1572,6 @@ createInfoCard("CONTA CONECTADA", playerDetails, 3)
 local gameDetails = string.format("Place ID: %d | Job ID Ativo", game.PlaceId)
 createInfoCard("INFORMAÇÕES DO SERVIDOR", gameDetails, 4)
 
--- Botão FECHAR PAINEL DEFINITIVAMENTE na aba Info
 local destroyPanelBtn = make("TextButton", {
     Size = UDim2.new(1, 0, 0, 42),
     BackgroundColor3 = Color3.fromRGB(50, 20, 20),
@@ -1381,6 +1586,11 @@ make("UICorner", {CornerRadius = UDim.new(0, 6)}, destroyPanelBtn)
 make("UIStroke", {Color = Color3.fromRGB(220, 50, 50), Transparency = 0.4, Thickness = 1}, destroyPanelBtn)
 
 destroyPanelBtn.MouseButton1Click:Connect(function()
+    getgenv().RedAimConfig.AimbotEnabled = false
+    getgenv().RedAimConfig.EspEnabled = false
+    getgenv().RedAimConfig.ExibirFOV = false
+    clearAllEspAndVisuals()
+
     TweenService:Create(main, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
         Size = UDim2.fromOffset(0, 0),
         Position = UDim2.new(0.5, 0, 0.5, 0)
@@ -1389,7 +1599,10 @@ destroyPanelBtn.MouseButton1Click:Connect(function()
 
     showClosedNotification()
     task.delay(3.2, function()
-        pcall(function() gui:Destroy() end)
+        pcall(function() 
+            clearAllEspAndVisuals()
+            gui:Destroy() 
+        end)
     end)
 end)
 
@@ -1409,7 +1622,6 @@ end)
 
 switchTab("Aimbot")
 
--- Botão X no topo do painel agora minimiza e mostra a notificação respeitando o timer de 5s
 closeBtn.MouseButton1Click:Connect(function()
     local bindName = tostring(getgenv().RedAimBind.Name)
     
